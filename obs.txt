@@ -1,1 +1,5 @@
 
+(240, 256, 3)
+7
+False
+{'coins': 1, 'flag_get': False, 'life': 2, 'score': 200, 'stage': 1, 'status': 'small', 'time': 398, 'world': 1, 'x_pos': 91}
