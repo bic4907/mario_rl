@@ -7,20 +7,24 @@ import torch.nn as nn
 import numpy as np
 import cv2
 import random
+import logging
+import time, datetime
 
 env = gym_super_mario_bros.make('SuperMarioBros-v0')
 env = BinarySpaceToDiscreteSpaceEnv(env, SIMPLE_MOVEMENT)
 
 
-RENDER = True
+RENDER = False
 MAX_EPISODE = 1000000000
-MEMORY_SIZE = 2000
+MEMORY_SIZE = 8000
 UPDATE_INTERVAL = 100
 GAMMA = 0.9
 EPSILON = 1
-EPSILON_MIN = 0.001
+EPSILON_MIN = 0.1
+EPSILON_LENGTH = 100000 # 해당프레임 동안 epsilon 감소
 LEARNING_RATE = 0.01
 
+SAVE_MODEL = True
 
 class Net(nn.Module):
     def __init__(self, s_dim, a_dim):
@@ -83,7 +87,7 @@ class DQN:
             action = q_value.argmax().item()
 
         if EPSILON > EPSILON_MIN:
-            EPSILON *= 0.9999
+            EPSILON -= (EPSILON - EPSILON_MIN) / EPSILON_LENGTH
 
         return action
 
@@ -113,7 +117,6 @@ class DQN:
 
         target = (batch_r + GAMMA * q_next)
         main = self.main_net.forward(batch_s).gather(1, batch_a)
-
         return torch.nn.MSELoss()(main, target)
 
 
@@ -127,46 +130,62 @@ class DQN:
     def update_target(self):
         self.target_net.load_state_dict(self.main_net.state_dict())
 
-
     def save(self):
-        pass
+        global EPSILON
+        state = {
+            'global_episode': self.episode,
+            'global_step': self.step,
+            'main_net': self.main_net.state_dict(),
+            'target_net': self.target_net.state_dict(),
+            'epsilon': EPSILON
+        }
+        torch.save(state, 'saved_model/' + ("%07d" % (self.episode)) + '.pt')
 
     def load(self, path):
-        pass
-
-
+        global EPSILON
+        data = torch.load('save_model/' + path)
+        self.episode = data['global_episode']
+        self.step = data['global_step']
+        self.main_net.load_state_dict(data['main_net'])
+        self.target_net.load_state_dict(data['target_net'])
+        EPSILON = data['epsilon']
+        print('LOADED MODEL : ' + path)
 
 
 def main():
-
+    global EPSILON
     model = DQN(env.observation_space.shape, env.action_space.n)
 
     done = True
-
+    accum_reward = 0
 
     while model.episode < MAX_EPISODE:
         if done:
             state = env.reset()
             state = rgb2dataset(state)
             model.episode += 1
-            print(model.episode)
+            logging.info("episode : %5d\tsteps : %10d\taccum_reward : %7d\tepsilon : %.3f" % (model.episode, model.step, accum_reward, EPSILON))
+            print("episode : %5d\t\tsteps : %10d\t\taccum_reward : %7d\t\tepsilon : %.3f" % (model.episode, model.step, accum_reward, EPSILON))
+
+            if SAVE_MODEL and model.episode % 100 == 0:
+                model.save()
 
         action = model.get_action(state)
         state_, reward, done, info = env.step(action)
+        accum_reward += reward
         model.step += 1
         model.memory(state, action, reward, state_, done)
 
-        if model.step > 1000:
+        if model.step > 10000:
             model.train()
 
-        if model.step % 2000 == 0:
+        if model.step % 20000 == 0:
             model.update_target()
 
         state = rgb2dataset(state_)
 
         if RENDER:
             env.render()
-
 
     env.close()
 
@@ -180,4 +199,5 @@ def initialize(m):
         m.bias.data.fill_(0)
 
 if __name__ == '__main__':
+    logging.basicConfig(filename=('logs/' + datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.log'), filemode='a', level=logging.DEBUG)
     main()
