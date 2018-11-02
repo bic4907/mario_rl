@@ -8,7 +8,9 @@ done = True
 for step in range(5000):
     if done:
         state = env.reset()
-    state, reward, done, info = env.step(env.action_space.sample())
+    ##state, reward, done, info = env.step(env.action_space.sample())
+    print(env.action_space.sample())
+    state, reward, done, info = env.step(6)
     print(state.shape, reward, done, info)
     env.render()
 
