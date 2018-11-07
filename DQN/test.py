@@ -4,27 +4,37 @@ from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
 
 import torch
 import torch.nn as nn
+import torchvision.models as models
+from tensorboardX import SummaryWriter
 import numpy as np
+
 import cv2
-import random
-import logging
-import time, datetime
+import random, logging, datetime
+from collections import namedtuple, deque
 
 env = gym_super_mario_bros.make('SuperMarioBros-v0')
 env = BinarySpaceToDiscreteSpaceEnv(env, SIMPLE_MOVEMENT)
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 RENDER = True
-MAX_EPISODE = 1000000000
-MEMORY_SIZE = 8000
-UPDATE_INTERVAL = 100
-GAMMA = 0.9
+
+# Hyper Parameters
+BUFFER_SIZE = int(1e5)
+BATCH_SIZE = 36
+GAMMA = 0.99
+TAU = float(1)
+
 EPSILON = 1
 EPSILON_MIN = 0.1
 EPSILON_LENGTH = 100000 # 해당프레임 동안 epsilon 감소
-LEARNING_RATE = 0.001
 
-MODEL_FILE = '0000200.pt'
+MAX_EPISODE = 10000
+TRAIN_START_STEP = int(1e5)
+LEARNING_RATE = float(1e-3)
+UPDATE_INTERVAL = 2000
+
+MODEL_FILE = '0000900.pt'
 
 class Net(nn.Module):
     def __init__(self, s_dim, a_dim):
@@ -33,33 +43,20 @@ class Net(nn.Module):
         self.s_dim = s_dim
         self.a_dim = a_dim
 
-        self.cnn = nn.Sequential(
-            nn.Conv2d(in_channels=s_dim[2], out_channels=32, kernel_size=5),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=4),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=5),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=32, out_channels=3, kernel_size=4),
-            nn.ReLU()
-        ).cuda()
+        self.cnn = models.resnet18(pretrained=False)
         self.fc = nn.Sequential(
-            nn.Linear(1872, 200),
+            nn.Linear(1000, 500),
             nn.ReLU(),
-            nn.Linear(200, 100),
-            nn.ReLU(),
-            nn.Linear(100, a_dim),
-        ).cuda()
+            nn.Linear(500, a_dim)
+        )
 
 
     def forward(self, s):
-        s = s.cuda()
         f = self.cnn(s)
-        f_flatten = f.reshape([-1, 1872])
-        q_value = self.fc(f_flatten).cpu()
+        f_flatten = f.reshape([-1, 1000])
+        q_value = self.fc(f_flatten)
         return q_value
+
 
 
 class DQN:
@@ -69,29 +66,17 @@ class DQN:
 
         self.episode = 0
         self.step = 0
-        self.replay_buffer = []
 
-        self.main_net = Net(s_dim, a_dim)
-        self.target_net = Net(s_dim, a_dim)
-        self.optimizer = torch.optim.Adam(self.main_net.parameters(), lr=LEARNING_RATE)
-
-        initialize(self.main_net)
-        initialize(self.target_net)
+        self.main_net = Net(s_dim, a_dim).to(device)
+        self.target_net = Net(s_dim, a_dim).to(device)
 
     def get_action(self, s):
-        q_value = self.main_net.forward(torch.Tensor([s]))
+
+        q_value = self.main_net.forward(torch.Tensor([s]).to(device))
         action = q_value.argmax().item()
 
+
         return action
-
-
-
-    def train(self):
-        batches = random.sample(self.replay_buffer, 36)
-        loss = self.get_loss(batches)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
 
     def load(self, path):
         global EPSILON
@@ -105,43 +90,46 @@ class DQN:
 
 
 def main():
-    global EPSILON
+
     model = DQN(env.observation_space.shape, env.action_space.n)
+    model.load(MODEL_FILE)
 
-    try:
-        model.load(MODEL_FILE)
-    except:
-        pass
+    while True:
 
+        state = env.reset()
+        state = rgb2dataset(state)
+        model.episode += 1
+        accum_reward = 0
 
-    accum_reward = 0
+        while True:
+            action = model.get_action(state)
+            state_, reward, done, info = env.step(action)
+            state_ = rgb2dataset(state_)
 
-    state = env.reset()
-    state = rgb2dataset(state)
+            accum_reward += reward
+            model.step += 1
+            state = state_
 
-    while model.episode < MAX_EPISODE:
+            if RENDER:
+                env.render()
 
-        action = model.get_action(state)
-        state_, reward, done, info = env.step(action)
-        accum_reward += reward
+            if done:
+                print("episode : %5d\t\tsteps : %10d\t\taccum_reward : %7d\t\tepsilon : %.3f" % (model.episode, model.step, accum_reward, EPSILON))
 
-        if RENDER:
-            env.render()
-
-        state = rgb2dataset(state_)
-
-
-        if done:
-            state = env.reset()
-            state = rgb2dataset(state)
-            print("episode : %5d\t\tsteps : %10d\t\taccum_reward : %7d\t\tepsilon : %.3f" % (model.episode, model.step, accum_reward, EPSILON))
-            accum_reward = 0
+                break
 
     env.close()
 
 
 def rgb2dataset(rgb_data):
-    return np.array(cv2.split(rgb_data))
+    # Use this for imshow
+    # rgb_data = cv2.cvtColor(rgb_data, cv2.COLOR_BGR2RGB)
+
+    # Raw Image : (240, 256, 3)
+    cropped = rgb_data[16:240, 16:240]
+    # Cropped Image : (224, 224, 3)
+    return np.array(cv2.split(cropped))
+    # DataSet Image : (3, 240, 240)
 
 def initialize(m):
     if type(m) == nn.Linear:
