@@ -22,7 +22,7 @@ RENDER = False
 SAVE_MODEL = True
 
 # Hyper Parameters
-BUFFER_SIZE = int(1e5)
+BUFFER_SIZE = 10000
 BATCH_SIZE = 36
 GAMMA = 0.99
 TAU = float(1)
@@ -32,8 +32,7 @@ EPSILON_MIN = 0.1
 EPSILON_LENGTH = 100000 # 해당프레임 동안 epsilon 감소
 
 MAX_EPISODE = 10000
-TRAIN_START_STEP = int(1e5)
-#TRAIN_START_STEP = 100
+TRAIN_START_STEP = 10000
 LEARNING_RATE = float(1e-3)
 UPDATE_INTERVAL = 2000
 
@@ -44,18 +43,18 @@ class Net(nn.Module):
         self.s_dim = s_dim
         self.a_dim = a_dim
 
-        self.cnn = models.vgg16(pretrained=True)
+        self.cnn = models.resnet18(pretrained=False)
         self.fc = nn.Sequential(
-            nn.Linear(1000, 500),
+            nn.Linear(1000, 256),
             nn.ReLU(),
-            nn.Linear(500, a_dim)
+            nn.Linear(256, a_dim)
         )
         initialize(self.fc)
 
-    def forward(self, s):
-        f = self.cnn(s)
-        f_flatten = f.reshape([-1, 1000])
-        q_value = self.fc(f_flatten)
+    def forward(self, x):
+        x = self.cnn(x)
+        x = x.reshape([-1, 1000])
+        q_value = self.fc(x)
         return q_value
 
 
@@ -129,7 +128,7 @@ class DQN:
             'target_net': self.target_net.state_dict(),
             'epsilon': EPSILON
         }
-        torch.save(state, 'saved_model/' + ("%07d" % (self.episode)) + '.pt')
+        torch.save(state, 'saved_model/resnet18(pre)/' + ("%07d" % (self.episode)) + '.pt')
 
     def load(self, path):
         global EPSILON
@@ -146,7 +145,7 @@ def main():
     global EPSILON
 
     model = DQN(env.observation_space.shape, env.action_space.n)
-    writer = SummaryWriter(log_dir='runs/DQN_181107_DDQN_VGG')
+    writer = SummaryWriter(log_dir='runs/DQN_181107_DDQN_ResNet18(pre)')
 
     while model.episode < MAX_EPISODE:
 
@@ -240,5 +239,5 @@ def initialize(m):
         m.bias.data.fill_(0)
 
 if __name__ == '__main__':
-    logging.basicConfig(filename=('logs/' + datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.log'), filemode='a', level=logging.DEBUG)
+    logging.basicConfig(filename=('logs/resnet18(pre)/' + datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.log'), filemode='a', level=logging.DEBUG)
     main()
