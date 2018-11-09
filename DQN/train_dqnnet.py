@@ -19,12 +19,11 @@ env = BinarySpaceToDiscreteSpaceEnv(env, SIMPLE_MOVEMENT)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-RENDER = False
-SAVE_MODEL = True
+RENDER = True
+SAVE_MODEL = False
 
 # Hyper Parameters
 BUFFER_SIZE = 20000
-#BUFFER_SIZE = 100
 BATCH_SIZE = 36
 GAMMA = 0.99
 TAU = float(1)
@@ -35,7 +34,6 @@ EPSILON_LENGTH = 100000 # 해당프레임 동안 epsilon 감소
 
 MAX_EPISODE = 10000
 TRAIN_START_STEP = 20000
-#TRAIN_START_STEP = 100
 LEARNING_RATE = float(1e-3)
 UPDATE_INTERVAL = 2000
 
@@ -45,29 +43,25 @@ class Net(nn.Module):
 
         self.s_dim = s_dim
         self.a_dim = a_dim
-        '''
+
         self.cnn = nn.Sequential(
             nn.Conv2d(in_channels=4, out_channels=16, kernel_size=[8, 8], stride=[4, 4], padding=0),
             nn.ReLU(),
             nn.Conv2d(in_channels=16, out_channels=32, kernel_size=[4, 4], stride=[2, 2], padding=0),
             nn.ReLU(),
         )
-        '''
-        self.conv1 = nn.Conv2d(in_channels=4, out_channels=16, kernel_size=[8, 8], stride=[4, 4], padding=0)
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=[4, 4], stride=[2, 2], padding=0)
 
         self.fc = nn.Sequential(
             nn.Linear(2592, 256),
             nn.ReLU(),
             nn.Linear(256, a_dim)
         )
-        initialize(self.conv1)
-        initialize(self.conv2)
+
         initialize(self.fc)
+        initialize(self.cnn)
 
     def forward(self, s):
-        f = F.relu(self.conv1(s))
-        f = F.relu(self.conv2(f))
+        f = F.relu(self.cnn(s))
         f_flatten = f.reshape([-1, 2592])
         q_value = self.fc(f_flatten)
         return q_value
@@ -130,7 +124,6 @@ class DQN:
             loss.backward()
             self.optimizer.step()
 
-
     def update_target(self):
         self.target_net.load_state_dict(self.main_net.state_dict())
 
@@ -143,11 +136,11 @@ class DQN:
             'target_net': self.target_net.state_dict(),
             'epsilon': EPSILON
         }
-        torch.save(state, 'saved_model/DQNNet/' + ("%07d" % (self.episode)) + '.pt')
+        torch.save(state, 'saved_model/transition/' + ("%07d" % (self.episode)) + '.pt')
 
     def load(self, path):
         global EPSILON
-        data = torch.load('saved_model/DQNNet/' + path)
+        data = torch.load('saved_model/transition/' + path)
         self.episode = data['global_episode']
         self.step = data['global_step']
         self.main_net.load_state_dict(data['main_net'])
@@ -160,7 +153,7 @@ def main():
     global EPSILON
 
     model = DQN(env.observation_space.shape, env.action_space.n)
-    writer = SummaryWriter(log_dir='runs/DQN_181107_DDQN DQNNet')
+    writer = SummaryWriter(log_dir='runs/transition/ddqn')
 
     while model.episode < MAX_EPISODE:
 
@@ -173,6 +166,7 @@ def main():
         transition = []
         transition.append(state)
 
+
         while True:
             if len(transition) == 4:
                 action = model.get_action(transition, is_random=False)
@@ -180,6 +174,13 @@ def main():
                 action = model.get_action(transition, is_random=True)
 
             state_, reward, done, info = env.step(action)
+
+            # Reward Shaping
+            reward += -0.2
+            if info['flag_get']:
+                reward += 100
+            print(reward)
+
             state_ = rgb2dataset(state_)
 
             model.memory(state, action, reward, done)
@@ -218,11 +219,9 @@ class ReplayBuffer:
     def __init__(self, buffer_size, batch_size):
         self.memory = deque(maxlen=buffer_size)
         self.batch_size = batch_size
-        # self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
         self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "done"])
 
     def add(self, state, action, reward, done):
-        # e = self.experience(state, action, reward, next_state, done)
         e = self.experience(state, action, reward, done)
         self.memory.append(e)
 
@@ -275,21 +274,11 @@ class ReplayBuffer:
 
 
 def rgb2dataset(rgb_data):
-    # Use this for imshow
-    # rgb_data = cv2.cvtColor(rgb_data, cv2.COLOR_BGR2RGB)
-    # Raw Image : (240, 256, 3)
-
     gray_data = cv2.cvtColor(rgb_data, cv2.COLOR_BGR2GRAY)
-    # Grayed Image : (240, 256, 1)
     cropped = gray_data[16:240, 16:240]
-    # Cropped Image : (224, 224, 3)
     resized = cv2.resize(cropped, (84, 84))
-    # Resized Image : (84 84, 3)
     downsampled = resized / 255.0
-    #cv2.imshow('Window', cropped)
-    #cv2.waitKey(0)
     return downsampled
-    # DataSet Image : (3, 240, 240)
 
 def initialize(m):
     if type(m) == nn.Linear:
@@ -301,5 +290,5 @@ def initialize(m):
 
 if __name__ == '__main__':
 
-    logging.basicConfig(filename=('logs/DQNNet/' + datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.log'), filemode='a', level=logging.DEBUG)
+    logging.basicConfig(filename=('logs/transition/' + datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.log'), filemode='a', level=logging.DEBUG)
     main()
