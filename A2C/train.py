@@ -34,8 +34,8 @@ class MarioEnv(Process):
         self.env = gym_super_mario_bros.make(self.env_id)
         self.env = BinarySpaceToDiscreteSpaceEnv(self.env, SIMPLE_MOVEMENT)
         self.reset()
-
-        print('[ Worker ',self.idx, ']', 'Playing <', self.env_id, '>')
+        print('[ Worker %2d ] ' % (self.idx), end='')
+        print('Playing <', self.env_id, '>')
 
         self.request_action(0, False)
 
@@ -91,7 +91,7 @@ if __name__ == '__main__':
 
 
     ####### MultiProcessing Settings ##########
-    num_worker = 1
+    num_worker = 16
     workers = []
     parent_conns = []
     queue = Queue()
@@ -128,7 +128,6 @@ if __name__ == '__main__':
         parent_conns.append(parent_conn)
 
 
-    max_prob = 0
     while model.g_episode < max_episode:
 
         while queue.empty(): # Wait for worker's state
@@ -142,16 +141,14 @@ if __name__ == '__main__':
 
 
             if len(transition) != 4:
-                action, prob = model.get_action(transition, is_random=True)
+                action = model.get_action(transition, is_random=True)
             else:
-                action, prob = model.get_action(transition, is_random=False)
+                action = model.get_action(transition, is_random=False)
 
                 buffer_state[idx].append(np.array(transition))
                 buffer_action[idx].append(action)
                 buffer_reward[idx].append(reward)
 
-            if max_prob < prob:
-                max_prob = prob
 
             # n-step을 위한 데이터들이 다 모였을 시
             if len(buffer_state[idx]) > n_step:
@@ -175,15 +172,14 @@ if __name__ == '__main__':
             model.g_episode += 1
             model.g_step += step
 
-            print('[ Worker', idx, '] ', end='')
-            print("Episode : %5d\tStep : %5d\tReward : %5d\tMax_prob : %.3f\tEpsilon : %3f\tX_pos : %5d" % (model.g_episode, step, reward, max_prob, model.epsilon, x_pos))
+            print('[ Worker %2d ] '% (idx), end='')
+            print("Episode : %5d\tStep : %5d\tReward : %5d\t\tEpsilon : %.3f\t\tX_pos : %5d" % (model.g_episode, step, reward, model.epsilon, x_pos))
 
             writer.add_scalar('perf/x_pos', x_pos, model.g_step)
             writer.add_scalar('perf/reward', reward, model.g_step)
             writer.add_scalar('data/epsilon', model.epsilon, model.g_step)
-            writer.add_scalar('data/max_prob', max_prob, model.g_step)
 
-            if model.g_episode % 50 == 0:
+            if model.g_episode % 100 == 0:
                 model.save()
 
             max_prob = 0

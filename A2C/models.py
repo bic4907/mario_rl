@@ -4,6 +4,8 @@ import torch.nn as nn
 import numpy as np
 import random
 
+from utils import initialize
+
 class Net(nn.Module):
     def __init__(self, s_dim, a_dim):
         super(Net, self).__init__()
@@ -28,6 +30,8 @@ class Net(nn.Module):
             nn.ReLU(),
             nn.Linear(256, 1),
         )
+        initialize(self.actor)
+        initialize(self.critic)
 
     def forward(self, x):
         x = self.cnn(x)
@@ -75,18 +79,15 @@ class A2C:
     def get_action(self, s, is_random=False):
         if np.random.uniform(0, 1) < self.epsilon or is_random:  # Exploration
             action = random.choice(np.arange(self.a_dim))
-
-            probs = (1 / self.a_dim) # uniform distribution
         else:
             probs, _ = self.net.forward(torch.Tensor([s]).to(self.device))
             action = torch.distributions.Categorical(probs).sample().cpu().numpy()[0]
 
-            probs = probs.cpu().detach().numpy().max()
 
         if self.epsilon > self.epsilon_end:
             self.epsilon -= (1 - self.epsilon_end) / self.epsilon_length
 
-        return action, probs
+        return action
 
     def train(self, buffer_state, buffer_action, buffer_reward, done):
 
@@ -128,14 +129,13 @@ class A2C:
 
     def save(self):
         state = {
-            'global_episode': self.episode,
-            'global_step': self.step,
-            'main_net': self.main_net.state_dict(),
-            'target_net': self.target_net.state_dict(),
+            'global_episode': self.g_episode,
+            'global_step': self.g_step,
+            'main_net': self.net.state_dict(),
             'epsilon': self.epsilon
         }
-        torch.save(state, 'saved_model/' + ("%07d" % (self.episode)) + '.pt')
-        print('[Model] Saved model : ' + path)
+        torch.save(state, 'saved_model/' + ("%07d" % (self.g_episode)) + '.pt')
+        print('[Model] Saved model : ' + ("%07d" % (self.g_episode)) + '.pt')
 
     def load(self, path):
         data = torch.load('saved_model/' + path)
