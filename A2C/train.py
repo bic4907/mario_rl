@@ -25,6 +25,7 @@ class MarioEnv(Process):
         self.n_step = n_step
         self.steps = 0
         self.episodes = 0
+        self.accum_reward = 0
         self.transition = []
 
     def run(self):
@@ -42,21 +43,19 @@ class MarioEnv(Process):
             action = self.child_conn.recv()
             next_state, reward, done, info = self.env.step(action)
             self.steps += 1
+            self.accum_reward += reward
             next_state = rgb2dataset(next_state)
 
             if self.is_render and self.idx == 0:
                 self.env.render()
 
             # make a transition
-
             self.transition.append(next_state)
             if len(self.transition) > 4:
                 self.transition.pop(0)
 
-
-
             if done:
-                self.send_result()
+                self.send_result(info['x_pos'])
                 self.reset()
                 self.request_action(reward, True)
             else:
@@ -70,16 +69,16 @@ class MarioEnv(Process):
 
         self.steps = 0
         self.episodes += 1
-
+        self.accum_reward = 0
 
     def request_action(self, reward, done):
-        self.queue.put([self.idx, "GetAction", [self.transition, reward, done]])
+        self.queue.put([self.idx, "OnStep", [self.transition, reward, done]])
 
-    def send_result(self):
-        self.queue.put([self.idx, "Result", [self.episodes, self.steps]])
+    def send_result(self, x_pos):
+        self.queue.put([self.idx, "Result", [self.episodes, self.steps, self.accum_reward, x_pos]])
 
 if __name__ == '__main__':
-    writer = SummaryWriter()
+    writer = SummaryWriter('runs/Vanilla')
 
     ####### Env Settings ##########
     env_id = 'SuperMarioBros-v2'
@@ -102,7 +101,8 @@ if __name__ == '__main__':
     max_episode = 10000
     n_step = 10
     use_cuda = True
-    is_render = True
+    is_render = False
+    save_model = True
     ###########################################
 
     buffer_state = [[] for _ in range(num_worker)]
@@ -128,6 +128,7 @@ if __name__ == '__main__':
         parent_conns.append(parent_conn)
 
 
+    max_prob = 0
     while model.g_episode < max_episode:
 
         while queue.empty(): # Wait for worker's state
@@ -136,23 +137,27 @@ if __name__ == '__main__':
         # Received some data
         idx, command, parameter = queue.get()
 
-        if command == "GetAction":
+        if command == "OnStep":
             transition, reward, done = parameter
 
 
             if len(transition) != 4:
-                action = model.get_action(transition, is_random=True)
+                action, prob = model.get_action(transition, is_random=True)
             else:
-                action = model.get_action(transition, is_random=False)
+                action, prob = model.get_action(transition, is_random=False)
 
                 buffer_state[idx].append(np.array(transition))
                 buffer_action[idx].append(action)
                 buffer_reward[idx].append(reward)
 
+            if max_prob < prob:
+                max_prob = prob
 
             # n-step을 위한 데이터들이 다 모였을 시
             if len(buffer_state[idx]) > n_step:
-                model.train(buffer_state[idx][:-1], buffer_action[idx][:-1], buffer_reward[idx][:-1], transition, done)
+                model.train(buffer_state[idx], buffer_action[idx], buffer_reward[idx], done)
+
+                # 가장 오래된 데이터부터 삭제
                 buffer_state[idx].pop(0)
                 buffer_action[idx].pop(0)
                 buffer_reward[idx].pop(0)
@@ -161,26 +166,24 @@ if __name__ == '__main__':
                 buffer_state[idx].clear()
                 buffer_action[idx].clear()
                 buffer_reward[idx].clear()
-                buffer_next_state[idx].clear()
 
             parent_conns[idx].send(action)
 
 
         elif command == "Result":
-            episode, step = parameter
+            episode, step, reward, x_pos = parameter
             model.g_episode += 1
             model.g_step += step
-            print('[ Worker ', idx, ']', "Episode : {} Step : {}".format(model.g_episode, step))
 
+            print('[ Worker', idx, '] ', end='')
+            print("Episode : %5d\tStep : %5d\tReward : %5d\tMax_prob : %.3f\tEpsilon : %3f\tX_pos : %5d" % (model.g_episode, step, reward, max_prob, model.epsilon, x_pos))
 
-        '''
-        if len(n_step_buffer[idx]) == n_step:
-            model.train(n_step_buffer[idx])
-            n_step_buffer[idx].clear()
+            writer.add_scalar('perf/x_pos', x_pos, model.g_step)
+            writer.add_scalar('perf/reward', reward, model.g_step)
+            writer.add_scalar('data/epsilon', model.epsilon, model.g_step)
+            writer.add_scalar('data/max_prob', max_prob, model.g_step)
 
-        if done:
-            model.g_episode += 1
-            model.g_step += steps
-            n_step_buffer[idx].clear()
-            print('[ Worker ', idx, ']', "Episode : {} Step : {}".format(model.g_episode, steps))
-            '''
+            if model.g_episode % 50 == 0:
+                model.save()
+
+            max_prob = 0
