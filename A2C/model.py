@@ -112,7 +112,7 @@ class A2C:
         value = value[:-1]                                              # value의 마지막 값은 next_state이기 때문에 삭제
 
         buffer_action = buffer_action[:-1]                              # 마지막 action은 next_state의 action 이기 때문에 삭제
-        buffer_action = torch.Tensor(buffer_action).to(self.device)
+        buffer_action = torch.LongTensor(buffer_action).to(self.device)
 
         td_error = tg_critic - value
         loss_critic = td_error.pow(2)                                   # td에서 MSE로 critic loss function
