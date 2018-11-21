@@ -4,6 +4,10 @@ import torch.nn as nn
 import numpy as np
 import random
 
+import cv2
+
+import time
+
 from utils import initialize
 
 class Net(nn.Module):
@@ -14,21 +18,23 @@ class Net(nn.Module):
         self.a_dim = a_dim
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(in_channels=4, out_channels=16, kernel_size=[8, 8], stride=[4, 4], padding=0),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=[4, 4], stride=[2, 2], padding=0),
-            nn.ReLU(),
+            nn.Conv2d(in_channels=4, out_channels=32, kernel_size=[8, 8], stride=[4, 4], padding=0),
+            nn.LeakyReLU(),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=[4, 4], stride=[2, 2], padding=0),
+            nn.LeakyReLU(),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=[3, 3], stride=[1, 1], padding=0),
+            nn.LeakyReLU(),
         )
         self.actor = nn.Sequential(
-            nn.Linear(2592, 256),
-            nn.ReLU(),
-            nn.Linear(256, a_dim),
+            nn.Linear(3136, 512),
+            nn.LeakyReLU(),
+            nn.Linear(512, a_dim),
             nn.Softmax(dim=-1)
         )
         self.critic = nn.Sequential(
-            nn.Linear(2592, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1),
+            nn.Linear(3136, 512),
+            nn.LeakyReLU(),
+            nn.Linear(512, 1),
         )
         initialize(self.actor)
         initialize(self.critic)
@@ -44,7 +50,7 @@ class Net(nn.Module):
             cv2.moveWindow('CNN Feature' + str(i), int(i % 6) * 90, int(i / 6) * 100)
         cv2.waitKey(0)
         '''
-        x = x.reshape([-1, 2592])
+        x = x.reshape([-1, 3136])
         p = self.actor(x)
         v = self.critic(x)
         return p, v
@@ -74,15 +80,16 @@ class A2C:
         self.g_step = 0
 
         self.net = Net(s_dim, a_dim).to(self.device)
-        self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
-
+        self.a_optimizer = torch.optim.Adam(self.net.actor.parameters(), lr=0.0003)
+        self.c_optimizer = torch.optim.Adam(self.net.critic.parameters(), lr=0.005)
     def get_action(self, s, is_random=False):
         if np.random.uniform(0, 1) < self.epsilon or is_random:  # Exploration
             action = random.choice(np.arange(self.a_dim))
         else:
             probs, _ = self.net.forward(torch.Tensor([s]).to(self.device))
-            action = torch.distributions.Categorical(probs).sample().cpu().numpy()[0]
 
+            action = torch.distributions.Categorical(probs).sample().cpu().numpy()[0]
+            # print((probs.cpu().detach().numpy() * 100).astype(int))
 
         if self.epsilon > self.epsilon_end:
             self.epsilon -= (1 - self.epsilon_end) / self.epsilon_length
@@ -91,9 +98,23 @@ class A2C:
 
     def train(self, buffer_state, buffer_action, buffer_reward, done):
 
+#        print(buffer_action)
+#        print(buffer_reward)
+#        print(done)
+
+        display_list = buffer_state[-1]
+
+        image = np.array(display_list[0])
+        image = cv2.hconcat((image, display_list[1], display_list[2], display_list[3]))
+        image = cv2.resize(image, (800, 200))
+
+        cv2.imshow(str('Transition'), image)
+        cv2.waitKey(0)
+
+
         states = torch.Tensor(np.array(buffer_state)).to(self.device)
         prob, value = self.net.forward(states)
-
+#        print(value)
         tg_value = value.cpu().detach().numpy()
         tg_critic = []                                                  # td를 구할때 baseline으로 쓰임
         if done:
@@ -123,10 +144,11 @@ class A2C:
         loss_actor = -dist.log_prob(buffer_action) * td_error.detach()
         loss = (loss_critic + loss_actor).mean()
 
-        self.optimizer.zero_grad()
+        self.a_optimizer.zero_grad()
+        self.c_optimizer.zero_grad()
         loss.backward()
-        self.optimizer.step()
-
+        self.a_optimizer.step()
+        self.c_optimizer.step()
     def save(self):
         state = {
             'global_episode': self.g_episode,
@@ -141,7 +163,6 @@ class A2C:
         data = torch.load('saved_model/' + path)
         self.episode = data['global_episode']
         self.step = data['global_step']
-        self.main_net.load_state_dict(data['main_net'])
-        self.target_net.load_state_dict(data['target_net'])
+        self.net.load_state_dict(data['main_net'])
         self.epsilon = data['epsilon']
         print('[Model] Loaded model : ' + path)
