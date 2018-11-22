@@ -8,7 +8,7 @@ import numpy as np
 from tensorboardX import SummaryWriter
 
 from multiprocessing import Process, Pipe, Queue
-from models import A2C
+from model import A2C
 from utils import rgb2dataset
 import copy
 
@@ -27,7 +27,7 @@ class MarioEnv(Process):
         self.episodes = 0
         self.accum_reward = 0
         self.transition = []
-
+        self.prev_xpos = 0
     def run(self):
         super(MarioEnv, self).run()
 
@@ -47,13 +47,13 @@ class MarioEnv(Process):
             if info['life'] != 3:
                 done = True
 
-#            reward = reward / 15.
+            reward = reward / 15.
 #            print(reward)
             self.steps += 1
             self.accum_reward += reward
             next_state = rgb2dataset(next_state)
 
-            if self.is_render and self.idx == 0 or True:
+            if self.is_render and self.idx == 0:
                 self.env.render()
 
             # make a transition
@@ -62,11 +62,12 @@ class MarioEnv(Process):
                 self.transition.pop(0)
 
             if done:
-                self.send_result(info['x_pos'])
+                self.send_result(self.prev_xpos)
                 self.reset()
                 self.request_action(reward, True)
             else:
                 self.request_action(reward, False)
+            self.prev_xpos = info['x_pos']
 
     def reset(self):
         state = self.env.reset()
@@ -98,7 +99,7 @@ if __name__ == '__main__':
 
 
     ####### MultiProcessing Settings ##########
-    num_worker = 1
+    num_worker = 8
     workers = []
     parent_conns = []
     queue = Queue()
@@ -108,7 +109,7 @@ if __name__ == '__main__':
     max_episode = 1000000
     n_step = 10
     use_cuda = True
-    is_render = True
+    is_render = False
     save_model = True
     ###########################################
 
@@ -118,7 +119,7 @@ if __name__ == '__main__':
     buffer_next_state = [[] for _ in range(num_worker)]
 
     model = A2C(s_dim, a_dim, num_worker,
-                gamma=0.95,
+                gamma=0.99,
                 epsilon_start=1.0,
                 epsilon_end=0.1,
                 epsilon_length=100,
@@ -179,13 +180,13 @@ if __name__ == '__main__':
             model.g_step += step
 
             print('[ Worker %2d ] '% (idx), end='')
-            print("Episode : %5d\tStep : %5d\tReward : %5d\t\tEpsilon : %.3f\t\tX_pos : %5d" % (model.g_episode, step, reward, model.epsilon, x_pos))
+            print("Episode : %5d\tStep : %5d\tReward : %5d\tX_pos : %5d" % (model.g_episode, step, reward, x_pos))
 
-            writer.add_scalar('perf/x_pos', x_pos, model.g_step)
-            writer.add_scalar('perf/reward', reward, model.g_step)
-            writer.add_scalar('data/epsilon', model.epsilon, model.g_step)
+            writer.add_scalar('data/step', step, model.g_episode)
+            writer.add_scalar('perf/x_pos', x_pos, model.g_episode)
+            writer.add_scalar('perf/reward', reward, model.g_episode)
 
-            if model.g_episode % 100 == 0:
+            if model.g_episode % 1000 == 0:
                 model.save()
 
             max_prob = 0

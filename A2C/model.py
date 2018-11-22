@@ -1,3 +1,5 @@
+from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+
 import torch
 import torch.nn as nn
 
@@ -80,8 +82,8 @@ class A2C:
         self.g_step = 0
 
         self.net = Net(s_dim, a_dim).to(self.device)
-        self.a_optimizer = torch.optim.Adam(self.net.actor.parameters(), lr=0.0003)
-        self.c_optimizer = torch.optim.Adam(self.net.critic.parameters(), lr=0.005)
+        self.a_optimizer = torch.optim.Adam(self.net.actor.parameters(), lr=0.001)
+        self.c_optimizer = torch.optim.Adam(self.net.critic.parameters(), lr=0.001)
     def get_action(self, s, is_random=False):
         if np.random.uniform(0, 1) < self.epsilon or is_random:  # Exploration
             action = random.choice(np.arange(self.a_dim))
@@ -102,14 +104,8 @@ class A2C:
 #        print(buffer_reward)
 #        print(done)
 
-        display_list = buffer_state[-1]
 
-        image = np.array(display_list[0])
-        image = cv2.hconcat((image, display_list[1], display_list[2], display_list[3]))
-        image = cv2.resize(image, (800, 200))
 
-        cv2.imshow(str('Transition'), image)
-        cv2.waitKey(0)
 
 
         states = torch.Tensor(np.array(buffer_state)).to(self.device)
@@ -144,6 +140,32 @@ class A2C:
         loss_actor = -dist.log_prob(buffer_action) * td_error.detach()
         loss = (loss_critic + loss_actor).mean()
 
+        '''
+        display_list = buffer_state[-1]
+
+        image = np.array(display_list[0])
+        image = cv2.hconcat((image, display_list[1], display_list[2], display_list[3]))
+        image = cv2.resize(image, (800, 200))
+
+        image = cv2.copyMakeBorder(image, 0, 60, 0, 0, cv2.BORDER_CONSTANT, 1);
+
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        bottomLeftCornerOfText = (100, 230)
+        fontScale = 0.6
+        fontColor = (255, 255, 255)
+        lineType = 2
+        output = 'Reward ' + str(buffer_reward[-1]) + ' Changeto ' + str(int(tg_critic[-1].item())) + ' Now '  + str(int(value[-1].item())) + ' Action ' + str(SIMPLE_MOVEMENT[buffer_action[-1]])
+
+        image = cv2.putText(image, output,
+                            bottomLeftCornerOfText,
+                            font,
+                            fontScale,
+                            fontColor,
+                            lineType)
+
+        cv2.imshow(str('Transition'), image)
+        cv2.waitKey(0)
+        '''
         self.a_optimizer.zero_grad()
         self.c_optimizer.zero_grad()
         loss.backward()

@@ -10,8 +10,8 @@ def rgb2dataset(rgb_data):
 
 def initialize(m):
     if type(m) == nn.Linear:
-        m.weight.data.normal_(0.0, 0.02)
-        m.bias.data.fill_(0)
+        nn.init.kaiming_uniform_(m.weight)
+        m.bias.data.zero_()
     elif type(m) == nn.Conv2d:
-        m.weight.data.normal_(0.0, 0.02)
-        m.bias.data.fill_(0)
+        nn.init.kaiming_uniform_(m.weight, a=1.0)
+        m.bias.data.zero_()
