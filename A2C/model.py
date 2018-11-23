@@ -38,6 +38,7 @@ class Net(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(512, 1),
         )
+        initialize(self.cnn)
         initialize(self.actor)
         initialize(self.critic)
 
@@ -82,8 +83,7 @@ class A2C:
         self.g_step = 0
 
         self.net = Net(s_dim, a_dim).to(self.device)
-        self.a_optimizer = torch.optim.Adam(self.net.actor.parameters(), lr=0.001)
-        self.c_optimizer = torch.optim.Adam(self.net.critic.parameters(), lr=0.001)
+        self.opim = torch.optim.Adam(self.net.parameters(), lr=lr)
     def get_action(self, s, is_random=False):
         if np.random.uniform(0, 1) < self.epsilon or is_random:  # Exploration
             action = random.choice(np.arange(self.a_dim))
@@ -166,11 +166,10 @@ class A2C:
         cv2.imshow(str('Transition'), image)
         cv2.waitKey(0)
         '''
-        self.a_optimizer.zero_grad()
-        self.c_optimizer.zero_grad()
+        self.opim.zero_grad()
         loss.backward()
-        self.a_optimizer.step()
-        self.c_optimizer.step()
+        self.opim.step()
+
     def save(self):
         state = {
             'global_episode': self.g_episode,
@@ -183,8 +182,8 @@ class A2C:
 
     def load(self, path):
         data = torch.load('saved_model/' + path)
-        self.episode = data['global_episode']
-        self.step = data['global_step']
+        self.g_episode = data['global_episode']
+        self.g_step = data['global_step']
         self.net.load_state_dict(data['main_net'])
         self.epsilon = data['epsilon']
         print('[Model] Loaded model : ' + path)

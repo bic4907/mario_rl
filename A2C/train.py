@@ -86,7 +86,7 @@ class MarioEnv(Process):
         self.queue.put([self.idx, "Result", [self.episodes, self.steps, self.accum_reward, x_pos]])
 
 if __name__ == '__main__':
-    writer = SummaryWriter('runs/Vanilla')
+    writer = SummaryWriter('runs/Vanilla2')
 
     ####### Env Settings ##########
     env_id = 'SuperMarioBros-v2'
@@ -109,9 +109,14 @@ if __name__ == '__main__':
     max_episode = 1000000
     n_step = 10
     use_cuda = True
-    is_render = False
+    is_render = True
     save_model = True
     ###########################################
+
+    ########## Learning Setting #############
+    noise_net = True
+    #########################################
+
 
     buffer_state = [[] for _ in range(num_worker)]
     buffer_action = [[] for _ in range(num_worker)]
@@ -127,8 +132,11 @@ if __name__ == '__main__':
                 n_step = n_step,
                 lr=0.001
                 )
-
-    #model.load('0010000.pt')
+    try:
+        pass
+        #model.load('0001000.pt')
+    except:
+        pass
 
     for idx in range(num_worker):
         parent_conn, child_conn = Pipe()
