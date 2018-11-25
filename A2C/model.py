@@ -100,13 +100,6 @@ class A2C:
 
     def train(self, buffer_state, buffer_action, buffer_reward, done):
 
-#        print(buffer_action)
-#        print(buffer_reward)
-#        print(done)
-
-
-
-
 
         states = torch.Tensor(np.array(buffer_state)).to(self.device)
         prob, value = self.net.forward(states)

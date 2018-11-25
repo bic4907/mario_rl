@@ -12,6 +12,8 @@ from model import A2C
 from utils import rgb2dataset
 import copy
 
+import cv2
+
 class MarioEnv(Process):
     def __init__(self, env_id, idx, child_conn, queue, n_step, is_render=False):
         super(MarioEnv, self).__init__()
@@ -26,8 +28,11 @@ class MarioEnv(Process):
         self.steps = 0
         self.episodes = 0
         self.accum_reward = 0
-        self.transition = []
+        self.transition = None
         self.prev_xpos = 0
+        self.prev_life = 0
+
+
     def run(self):
         super(MarioEnv, self).run()
 
@@ -44,11 +49,11 @@ class MarioEnv(Process):
 #            print(SIMPLE_MOVEMENT[action])
             next_state, reward, done, info = self.env.step(action)
 
-            if info['life'] != 3:
-                done = True
+            force_done = False
+            if reward == -15:
+                force_done = True
 
-            reward = reward / 15.
-#            print(reward)
+
             self.steps += 1
             self.accum_reward += reward
             next_state = rgb2dataset(next_state)
@@ -57,23 +62,24 @@ class MarioEnv(Process):
                 self.env.render()
 
             # make a transition
-            self.transition.append(next_state)
-            if len(self.transition) > 4:
-                self.transition.pop(0)
+            self.transition[:3, :, :] = self.transition[1:, : ,:]
+            self.transition[3, :, :] = next_state
 
             if done:
                 self.send_result(self.prev_xpos)
+
                 self.reset()
-                self.request_action(reward, True)
+                self.request_action(reward, force_done)
             else:
-                self.request_action(reward, False)
+                self.request_action(reward, force_done)
             self.prev_xpos = info['x_pos']
 
     def reset(self):
         state = self.env.reset()
         state = rgb2dataset(state)
-        self.transition.clear()
-        self.transition.append(state)
+
+        self.transition = np.zeros([4, 84, 84])
+        self.transition[-1, :] = state
 
         self.steps = 0
         self.episodes += 1
@@ -86,7 +92,7 @@ class MarioEnv(Process):
         self.queue.put([self.idx, "Result", [self.episodes, self.steps, self.accum_reward, x_pos]])
 
 if __name__ == '__main__':
-    writer = SummaryWriter('runs/Vanilla2')
+    writer = SummaryWriter('runs/Vanilla4')
 
     ####### Env Settings ##########
     env_id = 'SuperMarioBros-v2'
@@ -125,16 +131,13 @@ if __name__ == '__main__':
 
     model = A2C(s_dim, a_dim, num_worker,
                 gamma=0.99,
-                epsilon_start=1.0,
-                epsilon_end=0.1,
-                epsilon_length=100,
                 use_cuda=use_cuda,
                 n_step = n_step,
                 lr=0.001
                 )
     try:
         pass
-        #model.load('0001000.pt')
+        #model.load('0115000.pt')
     except:
         pass
 
@@ -156,28 +159,28 @@ if __name__ == '__main__':
         if command == "OnStep":
             transition, reward, done = parameter
 
-            if len(transition) != 4:
-                action = model.get_action(transition, is_random=True)
-            else:
-                action = model.get_action(transition, is_random=False)
 
-                buffer_state[idx].append(np.array(transition))
-                buffer_action[idx].append(action)
-                buffer_reward[idx].append(reward)
+            action = model.get_action(transition, is_random=False)
+
+            buffer_state[idx].append(np.array(transition))
+            buffer_action[idx].append(action)
+            buffer_reward[idx].append(reward)
 
 
             # n-step을 위한 데이터들이 다 모였을 시
             if len(buffer_state[idx]) > n_step:
                 model.train(buffer_state[idx], buffer_action[idx], buffer_reward[idx], done)
-                # 가장 오래된 데이터부터 삭제
-                buffer_state[idx].pop(0)
-                buffer_action[idx].pop(0)
-                buffer_reward[idx].pop(0)
+
+                buffer_state[idx].pop()
+                buffer_action[idx].pop()
+                buffer_reward[idx].pop()
+
 
             if done:
                 buffer_state[idx].clear()
                 buffer_action[idx].clear()
                 buffer_reward[idx].clear()
+
 
             parent_conns[idx].send(action)
 

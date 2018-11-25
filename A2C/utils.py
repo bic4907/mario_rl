@@ -1,12 +1,11 @@
-import cv2
+import cv2, numpy as np
 import torch.nn as nn
 
 def rgb2dataset(rgb_data):
     gray_data = cv2.cvtColor(rgb_data, cv2.COLOR_BGR2GRAY)
-    cropped = gray_data[16:240, 16:240]
-    resized = cv2.resize(cropped, (84, 84))
+    resized = cv2.resize(gray_data, (84, 84))
     downsampled = resized / 255.0
-    return downsampled
+    return np.array(downsampled)
 
 def initialize(m):
     if type(m) == nn.Linear:
